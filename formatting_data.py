@@ -1,27 +1,61 @@
 """
-Data Formatting
-
+Data Formatting untuk Proyeksi Menggunakan DFM
 @author: fawdywahyu18
 """
-
 
 import pandas as pd
 import numpy as np
 
 class DataFormattingHarga:
-    def __init__(self, harga_2018_2021, harga_2022, harga_2023, harga_2024):
-        self.harga_2018_2021 = harga_2018_2021
-        self.harga_2022 = harga_2022
-        self.harga_2023 = harga_2023
-        self.harga_2024 = harga_2024
+    def __init__(self, *args):
+        # Menyimpan semua dataset dalam satu list
+        self.datasets = args
 
     # Fungsi untuk membuat singkatan provinsi
     def create_abbreviation(self, province):
-        words = province.split()
-        if len(words) == 1:
-            return words[0][:3].lower()  # Ambil tiga huruf pertama jika hanya satu kata
-        else:
-            return ''.join([word[0] for word in words]).lower()  # Ambil huruf pertama dari setiap kata
+        province_abbr_dict = {
+            'Aceh': 'aceh',
+            'Sumatera Utara': 'sumut',
+            'Sumatera Barat': 'sumbar',
+            'Riau': 'riau',
+            'Jambi': 'jambi',
+            'Sumatera Selatan': 'sumsel',
+            'Bengkulu': 'bengk',
+            'Lampung': 'lamp',
+            'Bangka Belitung': 'babel',
+            'Kepulauan Bangka Belitung': 'babel',
+            'Kepulauan Riau': 'kepri',
+            'DKI Jakarta': 'jakar',
+            'D.K.I. Jakarta': 'jakar',
+            'Jawa Barat': 'jawab',
+            'Jawa Tengah': 'jawat',
+            'D.I. Yogyakarta': 'jogja',
+            'Jawa Timur': 'jatim',
+            'Banten': 'bant',
+            'Bali': 'bali',
+            'Nusa Tenggara Barat': 'ntbar',
+            'Nusa Tenggara Timur': 'nttim',
+            'Kalimantan Barat': 'kalbar',
+            'Kalimantan Tengah': 'kalteng',
+            'Kalimantan Selatan': 'kalsel',
+            'Kalimantan Timur': 'kaltim',
+            'Kalimantan Utara': 'kalut',
+            'Sulawesi Utara': 'sulut',
+            'Sulawesi Tengah': 'sulteng',
+            'Sulawesi Selatan': 'sulsel',
+            'Sulawesi Tenggara': 'sultra',
+            'Gorontalo': 'goro',
+            'Sulawesi Barat': 'sulbar',
+            'Maluku': 'maluku',
+            'Maluku Utara': 'malut',
+            'Papua Barat': 'papbar',
+            'Papua Barat Daya': 'papbar',
+            'Papua': 'papua',
+            'Papua Selatan': 'papua',
+            'Papua Tengah': 'papua',
+            'Papua Pegunungan': 'papua'
+        }
+        return province_abbr_dict.get(province, province)
     
     # Fungsi untuk membersihkan dan memproses data
     def clean_and_process_data(self, df):
@@ -34,81 +68,58 @@ class DataFormattingHarga:
         
         # Membersihkan data dari nilai inf dan NaN
         df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.dropna(subset=['harga'])
-
+        df = df.dropna(subset=['harga', 'provinsi'])
         return df
+
+    # Fungsi untuk menghitung harga bulanan dan koefisien variasi (kv)
+    def process_annual_data(self, df):
+        df.set_index('tanggal', inplace=True)
+        df_bulanan = df.groupby(['kode_provinsi', 'provinsi', 'published_name']).resample('M')['harga'].agg(['mean', 'std']).reset_index()
+        df_bulanan['kv'] = df_bulanan['std'] / df_bulanan['mean']
+        df_bulanan = df_bulanan.rename(columns={'mean': 'harga'}).drop(columns=['std'])
+        return df_bulanan
+    
+    # Fungsi untuk memproses semua dataset tahunan
+    def process_all_datasets(self):
+        results = []
+        for df in self.datasets:
+            clean_df = self.clean_and_process_data(df)
+            bulanan_df = self.process_annual_data(clean_df)
+            results.append(bulanan_df)
+        return pd.concat(results, ignore_index=True)
     
     # Fungsi untuk mengubah data ke format pivot wide
     def process_data(self, df):
-        # Membuat daftar provinsi unik
-        provinces = list(df['provinsi'].unique())
-
-        # Membuat DataFrame singkatan provinsi
-        df_provinces = pd.DataFrame(provinces, columns=['provinsi'])
-        df_provinces['singkatan'] = df_provinces['provinsi'].apply(self.create_abbreviation)
-
-        # Buat dictionary untuk memetakan nama provinsi ke singkatan
-        provinsi_to_singkatan = pd.Series(df_provinces['singkatan'].values, index=df_provinces['provinsi']).to_dict()
-
-        # Mengubah nama provinsi menjadi singkatan dengan menggunakan map()
-        df['provinsi_singkat'] = df['provinsi'].map(provinsi_to_singkatan)
-
         # Mapping untuk membuat nama kolom singkatan
         komoditas_mapping = {
             'Minyak Goreng Sawit Curah': 'mgsc',
             'Minyak Goreng Sawit Kemasan Premium': 'mgskp',
-            'Tepung Terigu': 'tt'
+            'Tepung Terigu': 'tt',
+            'Minyak Goreng Curah': 'mgsc',
+            'Minyak Goreng Kemasan Premium': 'mgskp',
+            'Minyak Goreng Kemasan': 'mgskp'
         }
 
-        # Buat kolom baru dengan singkatan berdasarkan published_name
         df['commodity_short'] = df['published_name'].map(komoditas_mapping)
-
-        # Buat kolom nama gabungan dari provinsi dan singkatan komoditas
+        df['provinsi_singkat'] = df['provinsi'].apply(self.create_abbreviation)
         df['nama_gabungan'] = df['provinsi_singkat'].str.lower() + '_' + df['commodity_short']
 
         # Lakukan pivot untuk membuat data menjadi bentuk lebar (wide format)
-        df_pivot = df.pivot_table(index='tanggal', columns='nama_gabungan', values='harga', aggfunc='mean').reset_index()
-
+        df_pivot = df.pivot_table(index='tanggal', columns='nama_gabungan', values=['harga', 'kv'], aggfunc='mean').reset_index()
         return df_pivot
 
     # Fungsi utama untuk menjalankan seluruh proses
     def run(self):
-        # Membersihkan dan memproses setiap dataframe
-        self.harga_2018_2021 = self.clean_and_process_data(self.harga_2018_2021)
-        self.harga_2022 = self.clean_and_process_data(self.harga_2022)
-        self.harga_2023 = self.clean_and_process_data(self.harga_2023)
-        self.harga_2024 = self.clean_and_process_data(self.harga_2024)
+        # Memproses semua dataset
+        gabungan_harga_bulanan = self.process_all_datasets()
 
-        # Mengelompokkan data di level provinsi dan bulanan
-        self.harga_2018_2021.set_index('tanggal', inplace=True)
-        self.harga_2018_2021_bulanan = self.harga_2018_2021.groupby(['kode_provinsi', 'provinsi', 'published_name']).resample('M')['harga'].mean().reset_index()
-        
-        self.harga_2022.set_index('tanggal', inplace=True)
-        self.harga_2022_bulanan = self.harga_2022.groupby(['kode_provinsi', 'provinsi', 'published_name']).resample('M')['harga'].mean().reset_index()
-        
-        self.harga_2023.set_index('tanggal', inplace=True)
-        self.harga_2023_bulanan = self.harga_2023.groupby(['kode_provinsi', 'provinsi', 'published_name']).resample('M')['harga'].mean().reset_index()
-        
-        self.harga_2024.set_index('tanggal', inplace=True)
-        self.harga_2024_bulanan = self.harga_2024.groupby(['kode_provinsi', 'provinsi', 'published_name']).resample('M')['harga'].mean().reset_index()
+        # Memproses data ke dalam format pivot wide
+        gabungan_harga_bulanan_pivot = self.process_data(gabungan_harga_bulanan)
 
-        # Proses data ke dalam format pivot wide
-        self.harga_2018_2021_bulanan_pivot = self.process_data(self.harga_2018_2021_bulanan)
-        self.harga_2022_bulanan_pivot = self.process_data(self.harga_2022_bulanan)
-        self.harga_2023_bulanan_pivot = self.process_data(self.harga_2023_bulanan)
-        self.harga_2024_bulanan_pivot = self.process_data(self.harga_2024_bulanan)
+        # Menghapus baris dengan tanggal tertentu
+        gabungan_harga_bulanan_pivot = gabungan_harga_bulanan_pivot[gabungan_harga_bulanan_pivot['tanggal'] != '2024-10-31']
 
-        # Menggabungkan semua DataFrame secara vertikal
-        gabungan_harga_bulanan = pd.concat([self.harga_2018_2021_bulanan_pivot, 
-                                            self.harga_2022_bulanan_pivot, 
-                                            self.harga_2023_bulanan_pivot, 
-                                            self.harga_2024_bulanan_pivot], 
-                                           ignore_index=True)
-        
-        gabungan_harga_bulanan = gabungan_harga_bulanan[gabungan_harga_bulanan['tanggal'] != '2024-10-31']
-
-        
-        return gabungan_harga_bulanan
+        return gabungan_harga_bulanan_pivot
 
 # Menggunakan class DataFormattingHarga
 # Membaca data dari file
@@ -117,13 +128,23 @@ harga_2022 = pd.read_csv('Data/Data dari Kemendag/Migor dan Tepung 2022.csv', se
 harga_2023 = pd.read_csv('Data/Data dari Kemendag/Migor dan Tepung 2023.csv', sep=';')
 harga_2024 = pd.read_excel('Data/Data dari Kemendag/Migor dan Tepung 2024.xlsx')
 
-# Inisialisasi class
+# Inisialisasi class dengan semua dataset
 processor = DataFormattingHarga(harga_2018_2021, harga_2022, harga_2023, harga_2024)
 
 # Menjalankan seluruh proses dan mendapatkan hasil gabungan
 gabungan_harga_bulanan = processor.run()
 
-# Menampilkan hasil
-print(gabungan_harga_bulanan)
+# Menyimpan data ke dalam Excel
+harga_bulanan = gabungan_harga_bulanan.xs('harga', axis=1, level=0)
+kv_bulanan = gabungan_harga_bulanan.xs('kv', axis=1, level=0)
 
-gabungan_harga_bulanan.to_excel('Data\harga_provinsi.xlsx', index=False)
+n_rows = len(harga_bulanan)
+tanggal_range = pd.date_range(start='2018-01-01', periods=n_rows, freq='M')
+
+harga_bulanan['tanggal'] = tanggal_range
+kv_bulanan['tanggal'] = tanggal_range
+kv_bulanan = kv_bulanan.rename(columns=lambda x: x + '_kv' if x != 'tanggal' else x)
+
+# Menyimpan hasil ke file Excel
+harga_bulanan.to_excel('Data/Data Peramalan/harga_provinsi test.xlsx', index=False)
+kv_bulanan.to_excel('Data/Data Peramalan/kv_provinsi test.xlsx', index=False)
