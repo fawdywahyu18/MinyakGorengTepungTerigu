@@ -44,7 +44,8 @@ prepare_data <- function(wd,
   
   list(xts_training = xts_training, 
        xts_test = xts_test, 
-       metadata = metadata)
+       metadata = metadata,
+       xts_utama = xts_utama)
 }
 
 
@@ -143,10 +144,11 @@ evaluate_forecast <- function(test_data, fc_data, output_file) {
 # Contoh penggunaan fungsi-fungsi di atas (sesuaikan path direktori dan file)
 # =======================================================================================
 
-wd_laptop <- ''
+wd_laptop <- '~/Library/CloudStorage/OneDrive-UGM365/Kerja/Dosen/Asian Development Bank'
+wd_rumah = 'C:/Users/User/OneDrive - UGM 365/Kerja/Dosen/Asian Development Bank'
 
 data_list <- prepare_data(
-  wd = wd_laptop,
+  wd = wd_rumah,
   file_harga_provinsi = 'Data/Data Peramalan/harga_provinsi.xlsx',
   file_kv_provinsi = 'Data/Data Peramalan/kv_provinsi.xlsx',
   file_data_eksternal = 'Data/Data Peramalan/data_eksternal.xlsx',
@@ -226,5 +228,134 @@ xts_test_TT = xts_test[, metadata$series[metadata$tepung_terigu == TRUE]]
 test_nas_TT = xts_test_TT[, 'nas_tt']
 evaluate_forecast(test_nas_TT, original_scale_TT, 
                   'Laporan/Evaluasi Peramalan/Evaluasi Peramalan 6 bulan TT.xlsx')
+
+
+# Forecast full sample
+forecast_full_sample <- function(xts_utama, metadata, filter_col,
+                                 r, p,
+                                 h = 6,
+                                 em_method = 'BM',
+                                 standardized = TRUE) {
+  # Ambil kolom yang relevan berdasar filter_col
+  kolom_terpilih <- metadata$series[metadata[[filter_col]] == TRUE]
+  metadata_subset <- metadata[metadata[[filter_col]] == TRUE, ]
+  
+  # Subset data
+  xts_subset <- xts_utama[, kolom_terpilih]
+  
+  # Log transform (bila di metadata tertulis log_trans == TRUE)
+  if (any(metadata_subset$log_trans)) {
+    xts_subset[, metadata_subset$log_trans] %<>% log()
+  }
+  
+  # Differencing
+  xts_subset_diff <- diff(xts_subset)
+  xts_subset_diff[is.infinite(xts_subset_diff) & xts_subset_diff < 0] <- NA
+  xts_subset_diff[is.nan(xts_subset_diff)] <- NA
+  
+  # Estimasi model DFM
+  model_full <- DFM(xts_subset_diff, r = r, p = p, em.method = em_method)
+  
+  # Forecast
+  fc_full <- predict(model_full, h = h, standardized = standardized)
+  fc_ori_full <- predict(model_full, h = h, standardized = FALSE)
+  
+  # Return hasil
+  list(
+    model_full = model_full,
+    fc_full = fc_full,         # forecast dalam skala standardized
+    fc_ori_full = fc_ori_full  # forecast dalam skala differenced (non-standardized)
+  )
+}
+
+
+# Contoh Penggunaan
+# Minyak Goreng
+
+# Forecast full sample untuk Minyak Goreng
+fc_full_migor <- forecast_full_sample(
+  xts_utama   = data_list$xts_utama,      # Data lengkap (xts) tanpa split
+  metadata    = metadata,       # Metadata lengkap
+  filter_col  = "minyak_goreng",
+  r           = rank_dipilih_migor,
+  p           = lag_dipilih_migor,
+  h           = 6,
+  em_method   = 'BM',
+  standardized = TRUE
+)
+
+# Hasil forecast (skala standardized):
+fc_full_migor$fc_full$X_fcst
+
+# Hasil forecast (skala differenced, non-standardized):
+fc_full_migor$fc_ori_full$X_fcst
+
+# MGCKC
+# Ambil forecast differenced (non-standardized) untuk nas_mgckc
+df_fc_mgckc_full <- fc_full_migor$fc_ori_full$X_fcst[,"nas_mgckc"]
+
+# Dapatkan observasi terakhir (sebelum forecast) dalam skala log (bila log transform)
+last_mgckc_full <- log(tail(xts_utama[,"nas_mgckc"], 1))
+
+# Jika data aslinya log, maka 'last_mgckc_full' sudah dalam log scale,
+# lalu kita gunakan recover_original_scale:
+original_scale_mgckc_full <- recover_original_scale(
+  df_fc_mgckc_full,
+  as.numeric(last_mgckc_full)
+)
+
+original_scale_mgckc_full
+
+# MGSKP
+# Ambil forecast differenced (non-standardized) untuk nas_mgskp
+df_fc_mgskp_full <- fc_full_migor$fc_ori_full$X_fcst[,"nas_mgskp"]
+
+# Dapatkan observasi terakhir (sebelum forecast) dalam skala log (bila log transform)
+last_mgskp_full <- log(tail(xts_utama[,"nas_mgskp"], 1))
+
+# Jika data aslinya log, maka 'last_mgckc_full' sudah dalam log scale,
+# lalu kita gunakan recover_original_scale:
+original_scale_mgskp_full <- recover_original_scale(
+  df_fc_mgskp_full,
+  as.numeric(last_mgskp_full)
+)
+
+original_scale_mgskp_full
+
+
+
+
+# TEPUNG TERIGU
+# Forecast full sample untuk Tepung Terigu
+fc_full_TT <- forecast_full_sample(
+  xts_utama   = data_list$xts_utama,        # Data lengkap
+  metadata    = metadata,
+  filter_col  = "tepung_terigu",
+  r           = rank_dipilih_TT,
+  p           = lag_dipilih_TT,
+  h           = 6,
+  em_method   = 'BM',
+  standardized = TRUE
+)
+
+# Lihat hasil forecast (standardized)
+fc_full_TT$fc_full$X_fcst
+
+# Hasil forecast (skala differenced, non-standardized)
+fc_full_TT$fc_ori_full$X_fcst
+
+# Ambil forecast differenced (non-standardized)
+df_fc_tt_full <- fc_full_TT$fc_ori_full$X_fcst[,"nas_tt"]
+
+# Observasi terakhir sebelum forecast
+last_tt_full <- log(tail(xts_utama[,"nas_tt"], 1))
+
+# Balik ke skala asli
+original_scale_tt_full <- recover_original_scale(
+  df_fc_tt_full,
+  as.numeric(last_tt_full)
+)
+
+original_scale_tt_full
 
 # Selesai.
